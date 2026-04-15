@@ -1,0 +1,973 @@
+/**
+ * GS1 EXPIRY TRACKER v10.0.0
+ * Theme: #2C6975 · Clay-style UI · Smart Product Icons
+ * By VYSAKH
+ */
+
+const CONFIG = {
+  DB_NAME: 'GS1TrackerDB',
+  DB_VERSION: 8,
+  EXPIRY_DAYS: 90,
+  VERSION: '10.0.0',
+  STORE_NAME: 'OASIS PHARMACY'
+};
+
+const App = {
+  db: null,
+  master: new Map(),
+  masterRMS: new Map(),
+  masterAlshaya: new Map(),
+  settings: { hapticEnabled: true, darkMode: false, storeName: CONFIG.STORE_NAME },
+  scanner: { active: false, instance: null },
+  pendingItem: null,
+  scanMode: 'normal',
+  filter: 'all',
+  search: '',
+  editingId: null,
+  categories: [
+    { id: 'medicine',   name: 'Medicine',     color: '#2C6975' },
+    { id: 'syrup',      name: 'Syrup',        color: '#3D8A99' },
+    { id: 'injection',  name: 'Injection',    color: '#4EC9C0' },
+    { id: 'tablet',     name: 'Tablet',       color: '#5AADBD' },
+    { id: 'cream',      name: 'Cream/Gel',    color: '#E8C4A0' },
+    { id: 'spray',      name: 'Spray',        color: '#7DD4C5' },
+    { id: 'vitamins',   name: 'Vitamins',     color: '#E07A65' },
+    { id: 'baby',       name: 'Baby',         color: '#B8D9DE' },
+    { id: 'cosmetics',  name: 'Cosmetics',    color: '#C9895A' },
+    { id: 'other',      name: 'Other',        color: '#8DADB5' }
+  ]
+};
+
+// ─── PRODUCT ICON SYSTEM ──────────────────────────────────────
+const Icons = {
+  // Detect category from product name / description
+  detectCategory(name = '', existingCategory = '') {
+    if (existingCategory && existingCategory !== 'medicine' && existingCategory !== 'other') return existingCategory;
+    const n = name.toLowerCase();
+    if (/\bsyrup\b|suspension|oral solution|elixir|linctus|mixture|drops\b|oral drops|paediatric drops/.test(n)) return 'syrup';
+    if (/inject|vial\b|ampoule|ampule|i\.v\b|infusion|iv bag|parenteral/.test(n)) return 'injection';
+    if (/tablet|\btab\b|caplet|lozenge|dispersible/.test(n)) return 'tablet';
+    if (/cream|gel\b|ointment|lotion|paste\b|emulsion|topical|dermal/.test(n)) return 'cream';
+    if (/spray|inhaler|nasal|aerosol|nebul/.test(n)) return 'spray';
+    if (/vitamin|supplement|mineral|calcium|omega|probiotic|multivit|iron tab|zinc/.test(n)) return 'vitamins';
+    if (/baby|infant|neonatal|paediatric|pediatric|formula\b|nappy/.test(n)) return 'baby';
+    if (/capsule|\bcap\b|softgel|soft gel|softcap/.test(n)) return 'medicine';
+    if (/cosmetic|makeup|mascara|lipstick|foundation|serum|moistur|toner|cleanser/.test(n)) return 'cosmetics';
+    return existingCategory || 'medicine';
+  },
+
+  // SVG icons for each category
+  svg: {
+    medicine: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 3h8a2 2 0 0 1 2 2v1H6V5a2 2 0 0 1 2-2z"/>
+      <rect x="6" y="6" width="12" height="15" rx="3"/>
+      <line x1="12" y1="10" x2="12" y2="17"/>
+      <line x1="9" y1="13.5" x2="15" y2="13.5"/>
+    </svg>`,
+
+    syrup: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 3h6l1 4H8L9 3z"/>
+      <path d="M8 7v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V7"/>
+      <path d="M8 13h8"/>
+      <line x1="10" y1="3" x2="10" y2="2"/>
+      <line x1="14" y1="3" x2="14" y2="2"/>
+    </svg>`,
+
+    injection: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 2l4 4-3 3-4-4z"/>
+      <path d="M15 5l-9 9"/>
+      <path d="M5 15l-3 4 4-3"/>
+      <path d="M11 9l4 4"/>
+      <line x1="9" y1="11" x2="13" y2="15"/>
+    </svg>`,
+
+    tablet: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="12" rx="9" ry="5.5"/>
+      <line x1="3.5" y1="10" x2="20.5" y2="10"/>
+      <path d="M12 6.5v11"/>
+    </svg>`,
+
+    cream: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 3h4l1 3H9z"/>
+      <rect x="7" y="6" width="10" height="14" rx="2"/>
+      <path d="M10 10h4"/>
+      <path d="M10 14h4"/>
+    </svg>`,
+
+    spray: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="5" y="8" width="9" height="13" rx="2"/>
+      <path d="M14 10h2a2 2 0 0 1 2 2"/>
+      <path d="M18 12l3-1"/>
+      <path d="M18 12l1 3"/>
+      <path d="M9 8V5h2"/>
+      <line x1="11" y1="5" x2="15" y2="5"/>
+    </svg>`,
+
+    vitamins: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 3h8a2 2 0 0 1 2 2v2H6V5a2 2 0 0 1 2-2z"/>
+      <path d="M6 7v13a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7"/>
+      <circle cx="12" cy="14" r="3"/>
+      <path d="M12 11v-2"/>
+    </svg>`,
+
+    baby: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 3h6l1 3H8z"/>
+      <path d="M8 6v14a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6"/>
+      <path d="M12 10v5"/>
+      <circle cx="12" cy="16" r="1" fill="currentColor"/>
+    </svg>`,
+
+    cosmetics: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="4" ry="2"/>
+      <path d="M8 5v13a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V5"/>
+      <path d="M8 11h8"/>
+    </svg>`,
+
+    other: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+    </svg>`
+  },
+
+  getColor(cat) {
+    const c = App.categories.find(x => x.id === cat);
+    return c ? c.color : '#8DADB5';
+  },
+
+  render(name = '', category = '') {
+    const cat = this.detectCategory(name, category);
+    const color = this.getColor(cat);
+    return `<div class="item-icon" style="background:${color}20;color:${color}">${this.svg[cat] || this.svg.other}</div>`;
+  }
+};
+
+// ─── GS1 PARSER ───────────────────────────────────────────────
+const GS1 = {
+  parse(code) {
+    const r = { raw: code || '', gtin: '', gtin13: '', expiry: '', expiryISO: '', expiryDisplay: '', batch: '', serial: '', qty: 1, isGS1: false };
+    if (!code) return r;
+    code = code.trim().replace(/[\r\n\t]/g, '');
+    [']C1',']e0',']E0',']d2',']Q3'].forEach(p => { if (code.startsWith(p)) code = code.slice(p.length); });
+    code = code.replace(/[\x1d\x1e\x1c~]/g, '\x1d').replace(/\[FNC1\]|<GS>|\{GS\}/gi, '\x1d');
+    if (code.includes('\x1d') || /\(\d{2,4}\)/.test(code) || (/^(01|02|10|17|21)\d/.test(code) && code.length > 16)) {
+      r.isGS1 = true;
+      this.parseGS1(code, r);
+    } else {
+      const digits = code.replace(/\D/g, '');
+      if (digits.length >= 8 && digits.length <= 14) {
+        r.gtin = digits.padStart(14, '0');
+        r.gtin13 = digits.slice(-13).padStart(13, '0');
+      }
+    }
+    return r;
+  },
+
+  parseGS1(code, r) {
+    if (code.includes('(')) {
+      let m = code.match(/\(01\)(\d{14})/); if (m) { r.gtin = m[1]; r.gtin13 = m[1].slice(-13); }
+      m = code.match(/\(17\)(\d{6})/) || code.match(/\(15\)(\d{6})/); if (m) this.parseDate(m[1], r);
+      m = code.match(/\(10\)([^\(]+)/); if (m) r.batch = m[1].trim().slice(0, 20);
+      m = code.match(/\(21\)([^\(]+)/); if (m) r.serial = m[1].trim().slice(0, 20);
+      return;
+    }
+    let pos = 0, len = code.length;
+    while (pos < len) {
+      if (code[pos] === '\x1d') { pos++; continue; }
+      const ai = code.slice(pos, pos + 2);
+      if (ai === '01' || ai === '02') { r.gtin = code.slice(pos+2,pos+16); r.gtin13 = r.gtin.slice(-13); pos += 16; }
+      else if (ai === '17' || ai === '15') { this.parseDate(code.slice(pos+2,pos+8), r); pos += 8; }
+      else if (ai === '10') { pos += 2; let b = ''; while (pos < len && code[pos] !== '\x1d') b += code[pos++]; r.batch = b.slice(0,20); }
+      else if (ai === '21') { pos += 2; while (pos < len && code[pos] !== '\x1d') pos++; }
+      else if (ai === '11'||ai==='12'||ai==='13') { pos += 8; }
+      else pos++;
+    }
+  },
+
+  parseDate(yymmdd, r) {
+    if (!yymmdd || yymmdd.length !== 6) return;
+    const yy = parseInt(yymmdd.slice(0,2)), mm = parseInt(yymmdd.slice(2,4));
+    let dd = parseInt(yymmdd.slice(4,6));
+    if (isNaN(yy)||isNaN(mm)||isNaN(dd)||mm<1||mm>12) return;
+    const year = yy >= 51 ? 1900+yy : 2000+yy;
+    if (dd === 0) dd = new Date(year, mm, 0).getDate();
+    r.expiry = yymmdd;
+    r.expiryISO = `${year}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+    r.expiryDisplay = `${String(dd).padStart(2,'0')}/${String(mm).padStart(2,'0')}/${year}`;
+  },
+
+  getStatus(iso) {
+    if (!iso) return 'unknown';
+    const today = new Date(); today.setHours(0,0,0,0);
+    const exp = new Date(iso); exp.setHours(0,0,0,0);
+    const days = Math.floor((exp - today) / 86400000);
+    return days < 0 ? 'expired' : days <= CONFIG.EXPIRY_DAYS ? 'expiring' : 'ok';
+  },
+
+  getDays(iso) {
+    if (!iso) return Infinity;
+    const today = new Date(); today.setHours(0,0,0,0);
+    const exp = new Date(iso); exp.setHours(0,0,0,0);
+    return Math.floor((exp - today) / 86400000);
+  }
+};
+
+// ─── MATCHER ──────────────────────────────────────────────────
+const Matcher = {
+  build(data) {
+    App.master.clear(); App.masterRMS.clear(); App.masterAlshaya.clear();
+    for (const item of data) {
+      const bc = String(item.barcode || '').replace(/\D/g, '');
+      if (bc.length < 8) continue;
+      const product = {
+        barcode: bc, barcode13: bc.slice(-13).padStart(13,'0'),
+        name: item.name || item.description || '',
+        rms: String(item.rms || item.rmsId || item['rms id'] || '').trim(),
+        alshayaCode: String(item.alshayaCode || item['alshaya code'] || item.newAlshayaCode || '').trim(),
+        brand: item.brand || '',
+        supplier: item.supplier || item.supplierName || item['supplier name'] || '',
+        conceptGroup: item.conceptGroup || item['concept group'] || '',
+        returnPolicy: item.returnPolicy || item['return policy'] || '',
+        keyBrands: item.keyBrands || item['key brands'] || '',
+        status: item.status || 'Active'
+      };
+      [bc, bc.padStart(14,'0'), bc.slice(-13), bc.slice(-12), bc.slice(-8)].forEach(k => App.master.set(k, product));
+      if (product.rms) { App.masterRMS.set(product.rms, product); App.masterRMS.set(product.rms.replace(/\D/g,''), product); }
+      if (product.alshayaCode) { App.masterAlshaya.set(product.alshayaCode, product); App.masterAlshaya.set(product.alshayaCode.replace(/[^A-Z0-9]/gi,''), product); }
+    }
+    console.log(`✅ Indexed ${App.master.size} entries`);
+  },
+
+  find(code) {
+    if (!code) return null;
+    const clean = code.replace(/\D/g, '');
+    if (App.master.has(clean)) return { ...App.master.get(clean), matchType:'BARCODE' };
+    if (App.master.has(clean.padStart(14,'0'))) return { ...App.master.get(clean.padStart(14,'0')), matchType:'GTIN14' };
+    if (App.master.has(clean.slice(-13))) return { ...App.master.get(clean.slice(-13)), matchType:'GTIN13' };
+    if (App.master.has(clean.slice(-12))) return { ...App.master.get(clean.slice(-12)), matchType:'GTIN12' };
+    if (App.master.has(clean.slice(-8))) return { ...App.master.get(clean.slice(-8)), matchType:'PARTIAL' };
+    if (App.masterRMS.has(code)) return { ...App.masterRMS.get(code), matchType:'RMS' };
+    if (App.masterRMS.has(clean)) return { ...App.masterRMS.get(clean), matchType:'RMS' };
+    if (App.masterAlshaya.has(code)) return { ...App.masterAlshaya.get(code), matchType:'ALSHAYA' };
+    return null;
+  }
+};
+
+// ─── DATABASE ─────────────────────────────────────────────────
+const DB = {
+  async init() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => { App.db = req.result; resolve(); };
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('history')) db.createObjectStore('history', { keyPath:'id', autoIncrement:true }).createIndex('timestamp','timestamp');
+        if (!db.objectStoreNames.contains('master')) db.createObjectStore('master', { keyPath:'barcode' });
+        if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath:'key' });
+      };
+    });
+  },
+
+  tx(store, mode, fn) {
+    return new Promise((resolve, reject) => {
+      const t = App.db.transaction(store, mode);
+      const s = t.objectStore(store);
+      const r = fn(s);
+      if (r?.onsuccess !== undefined) { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); }
+      else { t.oncomplete = () => resolve(r); t.onerror = () => reject(t.error); }
+    });
+  },
+
+  addHistory: (item) => { item.timestamp = Date.now(); return DB.tx('history','readwrite', s=>s.add(item)); },
+  updateHistory: (item) => DB.tx('history','readwrite', s=>s.put(item)),
+  getHistory: (id) => DB.tx('history','readonly', s=>s.get(id)),
+  getAllHistory: () => DB.tx('history','readonly', s=>s.getAll()),
+  deleteHistory: (id) => DB.tx('history','readwrite', s=>s.delete(id)),
+  clearHistory: () => DB.tx('history','readwrite', s=>s.clear()),
+  getAllMaster: () => DB.tx('master','readonly', s=>s.getAll()),
+
+  async bulkAddMaster(items) {
+    return new Promise((resolve, reject) => {
+      const t = App.db.transaction('master','readwrite');
+      const s = t.objectStore('master');
+      let c = 0;
+      for (const item of items) { if (item.barcode) { s.put(item); c++; } }
+      t.oncomplete = () => resolve(c);
+      t.onerror = () => reject(t.error);
+    });
+  },
+
+  getSetting: async (key, def) => { try { const r = await DB.tx('settings','readonly', s=>s.get(key)); return r?.value ?? def; } catch { return def; } },
+  setSetting: (key, value) => DB.tx('settings','readwrite', s=>s.put({ key, value }))
+};
+
+// ─── SCANNER ──────────────────────────────────────────────────
+const Scanner = {
+  async toggle() { App.scanner.active ? await this.stop() : await this.start(); },
+
+  async start() {
+    try {
+      if (!App.scanner.instance) App.scanner.instance = new Html5Qrcode('reader');
+      await App.scanner.instance.start(
+        { facingMode: 'environment' },
+        { fps: 15, qrbox: { width: 260, height: 160 } },
+        code => this.onScan(code),
+        () => {}
+      );
+      App.scanner.active = true;
+      document.getElementById('scannerPlaceholder').classList.add('hidden');
+      document.getElementById('viewfinder').classList.add('active');
+      document.getElementById('btnScannerText').textContent = 'Stop Scanner';
+      document.getElementById('btnScanner').classList.add('stop');
+      haptic('medium');
+    } catch (e) {
+      toast('Camera error: ' + e.message, 'error');
+    }
+  },
+
+  async stop() {
+    try { if (App.scanner.instance && App.scanner.active) await App.scanner.instance.stop(); } catch {}
+    App.scanner.active = false;
+    document.getElementById('scannerPlaceholder')?.classList.remove('hidden');
+    document.getElementById('viewfinder')?.classList.remove('active');
+    const txt = document.getElementById('btnScannerText');
+    if (txt) txt.textContent = 'Start Scanner';
+    document.getElementById('btnScanner')?.classList.remove('stop');
+  },
+
+  async onScan(code) {
+    await this.stop();
+    haptic('success');
+    if (App.scanMode === 'product' && App.pendingItem) {
+      completeProductScan(code);
+    } else {
+      processBarcode(code);
+    }
+  }
+};
+
+// ─── BARCODE PROCESSING ───────────────────────────────────────
+function processBarcode(code) {
+  if (!code?.trim()) return;
+  code = code.trim();
+  console.log('📷 Scanned:', code);
+  const parsed = GS1.parse(code);
+  let product = null;
+  if (parsed.gtin) product = Matcher.find(parsed.gtin);
+  if (!product && parsed.gtin13) product = Matcher.find(parsed.gtin13);
+  if (!product) product = Matcher.find(code);
+  showScanResult(parsed, product);
+  document.getElementById('manualInput').value = '';
+}
+
+function completeProductScan(code) {
+  const parsed = GS1.parse(code);
+  const product = Matcher.find(parsed.gtin || parsed.gtin13 || code);
+  clearPending();
+  if (product) {
+    const merged = { ...App.pendingItem, name: product.name, rms: product.rms, alshayaCode: product.alshayaCode, brand: product.brand, supplier: product.supplier, conceptGroup: product.conceptGroup, returnPolicy: product.returnPolicy, keyBrands: product.keyBrands, matchType: product.matchType };
+    showScanResult(merged, product);
+  } else {
+    showScanResult(App.pendingItem, null);
+  }
+}
+
+function clearPending() { App.pendingItem = null; App.scanMode = 'normal'; }
+
+// ─── SCAN RESULT WIDGET ───────────────────────────────────────
+function showScanResult(parsed, product) {
+  const overlay = document.getElementById('scanResultOverlay');
+  const widget = document.getElementById('scanResultWidget');
+  if (!overlay || !widget) return;
+
+  const found   = !!(product?.name);
+  const status  = parsed.expiryISO ? GS1.getStatus(parsed.expiryISO) : 'unknown';
+  const days    = parsed.expiryISO ? GS1.getDays(parsed.expiryISO)   : null;
+  const catId   = Icons.detectCategory(product?.name || '', '');
+  const iconHtml = Icons.render(product?.name || '', catId);
+
+  // Banner config
+  let bannerClass = 'found', bannerTitle = 'Product Found', bannerSub = product?.name || '';
+  let bannerIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" width="24" height="24"><polyline points="20 6 9 17 4 12"/></svg>`;
+  if (!found) {
+    bannerClass = 'notfound'; bannerTitle = 'Not in Master File'; bannerSub = 'Manual entry below';
+    bannerIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" width="24" height="24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="1" fill="#fff" stroke="none"/></svg>`;
+  }
+  if (status === 'expired') {
+    bannerClass = 'expired-banner'; bannerTitle = 'EXPIRED'; bannerSub = `Expired ${Math.abs(days)} day${Math.abs(days)!==1?'s':''} ago`;
+    bannerIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" width="24" height="24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+  }
+
+  // Status text for expiry cell
+  let expiryClass = status;
+  let expiryText = parsed.expiryDisplay || '—';
+  let statusPill = '';
+  if (status === 'ok' && days !== null) statusPill = `<div class="srw-status-pill pill-ok">✓ ${days}d remaining</div>`;
+  else if (status === 'expiring') statusPill = `<div class="srw-status-pill pill-expiring">⚠ ${days}d left</div>`;
+  else if (status === 'expired') statusPill = `<div class="srw-status-pill pill-expired">✕ Expired</div>`;
+
+  const manualSection = (!parsed.expiryISO || !parsed.batch) ? `
+    <div class="srw-manual">
+      <div class="srw-manual-title">⚠️ Missing data — enter manually</div>
+      <div class="srw-row">
+        <input type="date" id="srwExpiry" class="srw-input" value="${parsed.expiryISO || ''}" placeholder="Expiry">
+        <input type="text" id="srwBatch" class="srw-input" value="${parsed.batch || ''}" placeholder="Batch No.">
+      </div>
+    </div>` : '';
+
+  widget.innerHTML = `
+    <div class="srw-handle"><div class="srw-handle-bar"></div></div>
+
+    <div class="srw-banner ${bannerClass}">
+      <div class="srw-banner-icon">${bannerIcon}</div>
+      <div class="srw-banner-text">
+        <div class="srw-banner-title">${bannerTitle}</div>
+        <div class="srw-banner-sub">${escapeHtml(bannerSub.slice(0, 60))}</div>
+      </div>
+      <button class="srw-close-btn" onclick="hideScanResult()">✕</button>
+    </div>
+
+    <div class="srw-product">${found ? escapeHtml(product.name) : 'Unknown Product'}</div>
+
+    <div class="srw-grid">
+      <div class="srw-cell">
+        <div class="srw-cell-label">Barcode</div>
+        <div class="srw-cell-value">${parsed.gtin13 || parsed.gtin?.slice(-13) || parsed.raw?.replace(/\D/g,'').slice(0,13) || '—'}</div>
+      </div>
+      <div class="srw-cell">
+        <div class="srw-cell-label">RMS Code</div>
+        <div class="srw-cell-value">${product?.rms || '—'}</div>
+      </div>
+      <div class="srw-cell">
+        <div class="srw-cell-label">Alshaya Code</div>
+        <div class="srw-cell-value">${product?.alshayaCode || '—'}</div>
+      </div>
+      <div class="srw-cell">
+        <div class="srw-cell-label">Brand</div>
+        <div class="srw-cell-value text">${product?.brand || '—'}</div>
+      </div>
+      <div class="srw-cell">
+        <div class="srw-cell-label">Expiry Date</div>
+        <div class="srw-cell-value ${expiryClass}">${expiryText}</div>
+        ${statusPill}
+      </div>
+      <div class="srw-cell">
+        <div class="srw-cell-label">Batch No.</div>
+        <div class="srw-cell-value">${parsed.batch || '—'}</div>
+      </div>
+      <div class="srw-cell">
+        <div class="srw-cell-label">Supplier</div>
+        <div class="srw-cell-value text">${product?.supplier || '—'}</div>
+      </div>
+      <div class="srw-cell">
+        <div class="srw-cell-label">GS1 Code</div>
+        <div class="srw-cell-value ${parsed.isGS1 ? 'ok' : ''}">${parsed.isGS1 ? '✓ Yes' : '✗ No'}</div>
+      </div>
+    </div>
+
+    ${manualSection}
+
+    <div class="srw-qty">
+      <span class="srw-qty-label">Quantity:</span>
+      <button class="qty-btn" onclick="adjustSrwQty(-1)">−</button>
+      <input type="number" id="srwQty" value="1" min="1" class="qty-input">
+      <button class="qty-btn" onclick="adjustSrwQty(1)">+</button>
+    </div>
+
+    <div class="srw-actions">
+      ${!found ? `<button class="btn btn-outline" onclick="scanProductBarcode()" style="flex:1">📷 Scan Product</button>` : ''}
+      <button class="btn btn-primary" onclick="saveScanResult()" style="flex:2">💾 Save Entry</button>
+    </div>
+  `;
+
+  widget.dataset.parsed  = JSON.stringify(parsed);
+  widget.dataset.product = product ? JSON.stringify(product) : '';
+
+  overlay.classList.add('show');
+}
+
+function hideScanResult() {
+  document.getElementById('scanResultOverlay')?.classList.remove('show');
+}
+
+function adjustSrwQty(delta) {
+  const input = document.getElementById('srwQty');
+  if (input) input.value = Math.max(1, parseInt(input.value || 1) + delta);
+}
+
+function scanProductBarcode() {
+  const w = document.getElementById('scanResultWidget');
+  App.pendingItem = JSON.parse(w.dataset.parsed);
+  App.scanMode = 'product';
+  hideScanResult();
+  Scanner.start();
+}
+
+async function saveScanResult() {
+  const w       = document.getElementById('scanResultWidget');
+  const parsed  = JSON.parse(w.dataset.parsed);
+  const product = w.dataset.product ? JSON.parse(w.dataset.product) : {};
+
+  const manualExpiry = document.getElementById('srwExpiry')?.value;
+  const manualBatch  = document.getElementById('srwBatch')?.value;
+  const qty = parseInt(document.getElementById('srwQty')?.value) || 1;
+
+  // Auto-detect category from product name
+  const detectedCat = Icons.detectCategory(product.name || '', '');
+
+  const entry = {
+    raw: parsed.raw, gtin: parsed.gtin,
+    scannedBarcode: parsed.gtin13 || parsed.gtin?.slice(-13) || parsed.raw?.replace(/\D/g,'').slice(0,13),
+    name: product.name || 'Unknown Product',
+    rms: product.rms || '', alshayaCode: product.alshayaCode || '',
+    brand: product.brand || '', supplier: product.supplier || '',
+    conceptGroup: product.conceptGroup || '', returnPolicy: product.returnPolicy || '',
+    keyBrands: product.keyBrands || '', status: product.status || '',
+    matchType: product.matchType || 'NONE',
+    expiryISO: manualExpiry || parsed.expiryISO || '',
+    expiryDisplay: manualExpiry ? formatDateDisplay(manualExpiry) : parsed.expiryDisplay || '',
+    batch: manualBatch || parsed.batch || '',
+    qty, category: detectedCat, remarks: '',
+    storeName: App.settings.storeName, isGS1: parsed.isGS1
+  };
+
+  await DB.addHistory(entry);
+  hideScanResult();
+  toast(`Saved: ${entry.name}`, 'success');
+  haptic('success');
+  await refreshUI();
+}
+
+// ─── SAMPLE MASTER FILE DOWNLOAD ─────────────────────────────
+function downloadSampleMaster() {
+  const headers = 'barcode,name,rms,alshayaCode,brand,supplier,conceptGroup,returnPolicy,keyBrands,status';
+  const rows = [
+    '6291003570553,Panadol Extra Tablets 500mg,1001234,ALS-00123,GSK,ALSHAYA PHARMA,OTC ANALGESICS,Returnable,Panadol,Active',
+    '6291003570560,Brufen Syrup 100mg/5ml,1001235,ALS-00124,Abbott,ALSHAYA PHARMA,OTC ANALGESICS,Returnable,Brufen,Active',
+    '6291003570577,Vitamin C 1000mg Tablets,1001236,ALS-00125,Pharmaton,ALSHAYA PHARMA,VITAMINS & SUPPLEMENTS,Non-Returnable,Pharmaton,Active',
+    '6291003570584,Nexium 20mg Capsules 14s,1001237,ALS-00126,AstraZeneca,ALSHAYA PHARMA,GI MEDICINES,Returnable,Nexium,Active',
+    '6291003570591,Calpol Infant Suspension 120mg/5ml,1001238,ALS-00127,J&J,ALSHAYA PHARMA,BABY CARE,Returnable,Calpol,Active',
+    '6291003570607,Betadine Antiseptic Solution 500ml,1001239,ALS-00128,Mundipharma,ALSHAYA PHARMA,WOUND CARE,Non-Returnable,Betadine,Active',
+    '6291003570614,Hydrocortisone Cream 1% 30g,1001240,ALS-00129,Generic,ALSHAYA PHARMA,TOPICAL TREATMENTS,Non-Returnable,HC Cream,Active',
+    '6291003570621,Ventolin Inhaler 100mcg,1001241,ALS-00130,GSK,ALSHAYA PHARMA,RESPIRATORY,Returnable,Ventolin,Active',
+    '6291003570638,Insulin Glargine Injection 100U/ml,1001242,ALS-00131,Sanofi,ALSHAYA PHARMA,DIABETES CARE,Returnable,Lantus,Active',
+    '6291003570645,NAN ProExcella 1 Infant Formula 800g,1001243,ALS-00132,Nestle,ALSHAYA PHARMA,BABY NUTRITION,Non-Returnable,NAN,Active'
+  ];
+  const csv = headers + '\n' + rows.join('\n');
+  download(csv, 'sample-master-file.csv', 'text/csv');
+  toast('Sample file downloaded!', 'success');
+}
+
+// ─── HISTORY RENDERING ────────────────────────────────────────
+async function refreshUI() {
+  const [history, master] = await Promise.all([DB.getAllHistory(), DB.getAllMaster()]);
+  document.getElementById('masterCount').textContent = master.length;
+  document.getElementById('historyCount').textContent = history.length;
+  Matcher.build(master);
+  history.sort((a, b) => b.timestamp - a.timestamp);
+  renderHistory('recentScans', history.slice(0, 5), 'emptyRecent');
+  renderHistory('historyList', filterHistory(history), 'emptyHistory');
+}
+
+function filterHistory(history) {
+  let filtered = history;
+  if (App.filter !== 'all') {
+    if (App.categories.find(c => c.id === App.filter)) {
+      filtered = history.filter(h => h.category === App.filter);
+    } else {
+      filtered = history.filter(h => GS1.getStatus(h.expiryISO) === App.filter);
+    }
+  }
+  if (App.search) {
+    const q = App.search.toLowerCase();
+    filtered = filtered.filter(h =>
+      h.name?.toLowerCase().includes(q) ||
+      h.gtin?.includes(q) ||
+      h.rms?.includes(q) ||
+      h.batch?.toLowerCase().includes(q) ||
+      h.brand?.toLowerCase().includes(q)
+    );
+  }
+  return filtered;
+}
+
+function renderHistory(containerId, items, emptyId) {
+  const container = document.getElementById(containerId);
+  const empty = document.getElementById(emptyId);
+  if (!container) return;
+
+  if (!items.length) {
+    container.innerHTML = '';
+    if (empty) { container.appendChild(empty); empty.classList.remove('hidden'); }
+    return;
+  }
+  if (empty) empty.classList.add('hidden');
+
+  container.innerHTML = items.map(item => {
+    const status = GS1.getStatus(item.expiryISO);
+    const days   = GS1.getDays(item.expiryISO);
+    const iconHtml = Icons.render(item.name || '', item.category || '');
+
+    let badge = `<span class="badge badge-ok">OK</span>`;
+    if (status === 'expired') badge = `<span class="badge badge-expired">EXPIRED</span>`;
+    else if (status === 'expiring') badge = `<span class="badge badge-expiring">${days}d</span>`;
+    else if (status === 'unknown') badge = `<span class="badge badge-unknown">NO DATE</span>`;
+
+    return `
+      <div class="history-item ${status}" onclick="editItem(${item.id})">
+        ${iconHtml}
+        <div class="item-info">
+          <div class="item-name">${escapeHtml(item.name)}</div>
+          <div class="item-meta">${item.expiryDisplay || 'No expiry'} · ${item.batch || 'No batch'} · ${item.rms || item.brand || '—'}</div>
+        </div>
+        ${badge}
+        <div class="qty-controls" onclick="event.stopPropagation()">
+          <button class="qty-btn" onclick="adjustQty(${item.id},-1)">−</button>
+          <span class="qty-value">${item.qty || 1}</span>
+          <button class="qty-btn" onclick="adjustQty(${item.id},1)">+</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function adjustQty(id, delta) {
+  const item = await DB.getHistory(id);
+  if (item) {
+    item.qty = Math.max(1, (item.qty || 1) + delta);
+    await DB.updateHistory(item);
+    haptic('light');
+    await refreshUI();
+  }
+}
+
+// ─── EXPORT ───────────────────────────────────────────────────
+async function exportCSV() {
+  const history = await DB.getAllHistory();
+  if (!history.length) { toast('No data to export', 'warning'); return; }
+  const headers = ['STORE NAME','RMS CODE','BARCODE','ALSHAYA CODE','DESCRIPTION','BRAND','SUPPLIER','CONCEPT GROUP','RETURN POLICY','KEY BRANDS','QTY','EXPIRY DATE','BATCH NO','STATUS','CATEGORY','REMARKS'];
+  const rows = history.map(h => [
+    h.storeName || App.settings.storeName, h.rms||'', h.scannedBarcode||'',
+    h.alshayaCode||'', h.name||'', h.brand||'', h.supplier||'',
+    h.conceptGroup||'', h.returnPolicy||'', h.keyBrands||'',
+    h.qty||1, h.expiryDisplay||'', h.batch||'',
+    GS1.getStatus(h.expiryISO).toUpperCase(), h.category||'', h.remarks||''
+  ]);
+  let csv = headers.join(',') + '\n';
+  rows.forEach(row => { csv += row.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',') + '\n'; });
+  download(csv, `gs1-expiry-${formatDateFile()}.csv`, 'text/csv');
+  toast('CSV exported!', 'success');
+}
+
+async function exportTSV() {
+  const history = await DB.getAllHistory();
+  if (!history.length) { toast('No data to export', 'warning'); return; }
+  const headers = ['BARCODE','RMS ID','ALSHAYA CODE','DESCRIPTION','BRAND','SUPPLIER','QTY','EXPIRY DATE','BATCH NO'];
+  const rows = history.map(h => [
+    h.scannedBarcode||'', h.rms||'', h.alshayaCode||'',
+    h.name||'', h.brand||'', h.supplier||'',
+    h.qty||1, h.expiryISO ? excelDate(h.expiryISO) : '', h.batch||''
+  ]);
+  let tsv = headers.join('\t') + '\n';
+  rows.forEach(row => { tsv += row.join('\t') + '\n'; });
+  download(tsv, `gs1-expiry-${formatDateFile()}.tsv`, 'text/tab-separated-values');
+  toast('TSV exported for Excel!', 'success');
+}
+
+function excelDate(iso) {
+  const d = new Date(iso);
+  return Math.floor((d - new Date(1899,11,30)) / 86400000);
+}
+
+// ─── MASTER UPLOAD ────────────────────────────────────────────
+async function uploadMaster(file) {
+  try {
+    const text = await file.text();
+    const lines = text.trim().split(/[\r\n]+/);
+    if (lines.length < 2) { toast('File too short or empty', 'error'); return; }
+    const delim = lines[0].includes('\t') ? '\t' : ',';
+    const cols  = lines[0].toLowerCase().split(delim).map(c => c.trim().replace(/['"]/g,''));
+    const idx = {
+      barcode: cols.findIndex(c => /barcode|gtin|ean|upc/.test(c)),
+      name: cols.findIndex(c => /^(name|description|product)$/.test(c)),
+      rms: cols.findIndex(c => /rms/.test(c)),
+      alshaya: cols.findIndex(c => /alshaya/.test(c)),
+      brand: cols.findIndex(c => c === 'brand'),
+      supplier: cols.findIndex(c => /supplier/.test(c)),
+      concept: cols.findIndex(c => /concept/.test(c)),
+      returnPolicy: cols.findIndex(c => /return/.test(c)),
+      keyBrands: cols.findIndex(c => /key.*brand/.test(c)),
+      status: cols.findIndex(c => c === 'status')
+    };
+    if (idx.barcode === -1) { toast('No barcode column found', 'error'); return; }
+    const items = [];
+    for (let i = 1; i < lines.length; i++) {
+      const row = lines[i].split(delim).map(c => c.trim().replace(/^["']|["']$/g,''));
+      const bc  = (row[idx.barcode] || '').replace(/\D/g,'');
+      if (bc.length >= 8) {
+        items.push({
+          barcode: bc,
+          name: idx.name >= 0 ? row[idx.name] : '',
+          rms: idx.rms >= 0 ? row[idx.rms] : '',
+          alshayaCode: idx.alshaya >= 0 ? row[idx.alshaya] : '',
+          brand: idx.brand >= 0 ? row[idx.brand] : '',
+          supplier: idx.supplier >= 0 ? row[idx.supplier] : '',
+          conceptGroup: idx.concept >= 0 ? row[idx.concept] : '',
+          returnPolicy: idx.returnPolicy >= 0 ? row[idx.returnPolicy] : '',
+          keyBrands: idx.keyBrands >= 0 ? row[idx.keyBrands] : '',
+          status: idx.status >= 0 ? row[idx.status] : 'Active'
+        });
+      }
+    }
+    const count = await DB.bulkAddMaster(items);
+    document.getElementById('lastUpdated').textContent = 'Now';
+    await refreshUI();
+    toast(`✅ Loaded ${count} products`, 'success');
+  } catch (e) {
+    console.error(e);
+    toast('Upload failed: ' + e.message, 'error');
+  }
+}
+
+// ─── EDIT MODAL ───────────────────────────────────────────────
+async function editItem(id) {
+  const item = await DB.getHistory(id);
+  if (!item) return;
+  App.editingId = id;
+  document.getElementById('editName').value     = item.name || '';
+  document.getElementById('editRms').value      = item.rms || '';
+  document.getElementById('editAlshaya').value  = item.alshayaCode || '';
+  document.getElementById('editBrand').value    = item.brand || '';
+  document.getElementById('editQty').value      = item.qty || 1;
+  document.getElementById('editCategory').value = Icons.detectCategory(item.name || '', item.category || '');
+  document.getElementById('editExpiry').value   = item.expiryISO || '';
+  document.getElementById('editBatch').value    = item.batch || '';
+  document.getElementById('editRemarks').value  = item.remarks || '';
+  document.getElementById('editModal').classList.add('show');
+}
+
+async function saveEdit() {
+  const item = await DB.getHistory(App.editingId);
+  if (!item) return;
+  item.name        = document.getElementById('editName').value.trim();
+  item.rms         = document.getElementById('editRms').value.trim();
+  item.alshayaCode = document.getElementById('editAlshaya').value.trim();
+  item.brand       = document.getElementById('editBrand').value.trim();
+  item.qty         = parseInt(document.getElementById('editQty').value) || 1;
+  item.category    = document.getElementById('editCategory').value;
+  item.expiryISO   = document.getElementById('editExpiry').value;
+  item.expiryDisplay = item.expiryISO ? formatDateDisplay(item.expiryISO) : '';
+  item.batch       = document.getElementById('editBatch').value.trim();
+  item.remarks     = document.getElementById('editRemarks').value.trim();
+  await DB.updateHistory(item);
+  closeEditModal();
+  await refreshUI();
+  toast('Saved!', 'success');
+}
+
+function closeEditModal() { document.getElementById('editModal').classList.remove('show'); App.editingId = null; }
+async function deleteItem() {
+  if (confirm('Delete this item?')) {
+    await DB.deleteHistory(App.editingId);
+    closeEditModal();
+    await refreshUI();
+    toast('Deleted', 'success');
+  }
+}
+
+// ─── BULK ─────────────────────────────────────────────────────
+async function processBulk() {
+  const text = document.getElementById('bulkInput').value.trim();
+  if (!text) { toast('Paste some barcodes first', 'warning'); return; }
+  const lines = text.split(/[\r\n]+/).filter(l => l.trim());
+  let total = 0, valid = 0, matched = 0;
+  for (const line of lines) {
+    total++;
+    const parsed = GS1.parse(line.trim());
+    if (parsed.gtin || parsed.gtin13) {
+      valid++;
+      const product = Matcher.find(parsed.gtin || parsed.gtin13 || line);
+      if (product) matched++;
+      await DB.addHistory({
+        raw: line, gtin: parsed.gtin,
+        scannedBarcode: parsed.gtin13 || parsed.gtin?.slice(-13),
+        name: product?.name || 'Unknown', rms: product?.rms || '',
+        alshayaCode: product?.alshayaCode || '', brand: product?.brand || '',
+        supplier: product?.supplier || '', matchType: product?.matchType || 'NONE',
+        expiryISO: parsed.expiryISO, expiryDisplay: parsed.expiryDisplay,
+        batch: parsed.batch, qty: 1,
+        category: Icons.detectCategory(product?.name || '', ''),
+        storeName: App.settings.storeName, isGS1: parsed.isGS1
+      });
+    }
+  }
+  document.getElementById('statTotal').textContent   = total;
+  document.getElementById('statValid').textContent   = valid;
+  document.getElementById('statMatched').textContent = matched;
+  await refreshUI();
+  toast(`Processed ${valid}/${total} barcodes`, valid === total ? 'success' : 'warning');
+  document.getElementById('bulkInput').value = '';
+}
+
+// ─── NAVIGATION ───────────────────────────────────────────────
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(n => n.classList.remove('active'));
+  document.getElementById(`page-${id}`)?.classList.add('active');
+  document.querySelector(`.nav-btn[data-page="${id}"]`)?.classList.add('active');
+  if (id !== 'home' && App.scanner.active) Scanner.stop();
+  closeSideMenu();
+}
+
+function openSideMenu() { document.getElementById('sideMenuBg').classList.add('show'); document.getElementById('sideMenu').classList.add('show'); }
+function closeSideMenu() { document.getElementById('sideMenuBg').classList.remove('show'); document.getElementById('sideMenu').classList.remove('show'); }
+
+function showStoreModal() {
+  document.getElementById('storeNameInput').value = App.settings.storeName || '';
+  document.getElementById('storeModal').classList.add('show');
+}
+
+// ─── UTILITIES ────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  const icons = { success:'✓', error:'✕', warning:'⚠', info:'ℹ' };
+  el.innerHTML = `<div class="toast-icon">${icons[type]||'ℹ'}</div><span>${escapeHtml(msg)}</span>`;
+  wrap.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2800);
+}
+
+function haptic(type) {
+  if (!App.settings.hapticEnabled || !navigator.vibrate) return;
+  navigator.vibrate({ light:10, medium:25, success:[20,40,20], error:[80,40,80] }[type] || 10);
+}
+
+function escapeHtml(s) {
+  return s ? String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])) : '';
+}
+
+function formatDateDisplay(iso) { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`; }
+function formatDateFile() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`; }
+function download(content, name, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content],{type})); a.download = name; a.click(); }
+
+// ─── EVENT SETUP ──────────────────────────────────────────────
+function setupEvents() {
+  // Nav
+  document.querySelectorAll('.nav-btn').forEach(btn => btn.onclick = () => showPage(btn.dataset.page));
+
+  // Scanner
+  document.getElementById('btnScanner').onclick = () => Scanner.toggle();
+  document.getElementById('scannerFrame').onclick = () => { if (!App.scanner.active) Scanner.start(); };
+
+  // Manual input
+  const mi = document.getElementById('manualInput');
+  mi.onkeypress = e => { if (e.key === 'Enter') processBarcode(mi.value); };
+  document.getElementById('btnManualAdd').onclick = () => processBarcode(mi.value);
+
+  // History
+  document.getElementById('viewAllHistory').onclick = () => showPage('history');
+  document.getElementById('searchInput').oninput = e => { App.search = e.target.value; refreshUI(); };
+  document.querySelectorAll('.chip').forEach(chip => chip.onclick = () => {
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    App.filter = chip.dataset.filter;
+    refreshUI();
+  });
+
+  // Bulk
+  document.getElementById('btnProcessBulk').onclick = processBulk;
+  document.getElementById('btnClearBulk').onclick = () => { document.getElementById('bulkInput').value = ''; };
+
+  // Master upload
+  document.getElementById('uploadArea').onclick = () => document.getElementById('masterFileInput').click();
+  document.getElementById('masterFileInput').onchange = e => { if (e.target.files[0]) { uploadMaster(e.target.files[0]); e.target.value=''; } };
+
+  // Sample download
+  document.getElementById('btnSampleDownload').onclick = downloadSampleMaster;
+
+  // Toggles
+  document.getElementById('toggleDarkMode').onclick = function() {
+    this.classList.toggle('on');
+    document.body.classList.toggle('dark');
+    App.settings.darkMode = this.classList.contains('on');
+    DB.setSetting('darkMode', App.settings.darkMode);
+  };
+  document.getElementById('toggleHaptic').onclick = function() {
+    this.classList.toggle('on');
+    App.settings.hapticEnabled = this.classList.contains('on');
+    DB.setSetting('hapticEnabled', App.settings.hapticEnabled);
+  };
+
+  // Export
+  document.getElementById('btnExportCSV').onclick = exportCSV;
+  document.getElementById('btnExportTSV').onclick = exportTSV;
+  document.getElementById('btnClearAll').onclick = async () => {
+    if (confirm('Clear all scan history? This cannot be undone.')) {
+      await DB.clearHistory(); await refreshUI(); toast('History cleared', 'success');
+    }
+  };
+
+  // Side menu
+  document.getElementById('btnMenu').onclick = openSideMenu;
+  document.getElementById('sideMenuBg').onclick = closeSideMenu;
+  document.getElementById('menuExport').onclick = () => { closeSideMenu(); exportCSV(); };
+  document.getElementById('menuClear').onclick = async () => {
+    closeSideMenu();
+    if (confirm('Clear all?')) { await DB.clearHistory(); await refreshUI(); }
+  };
+  document.getElementById('menuAbout').onclick = () => { closeSideMenu(); alert(`GS1 Expiry Tracker v${CONFIG.VERSION}\nBy VYSAKH\nTheme: #2C6975`); };
+  document.getElementById('menuStore').onclick = () => { closeSideMenu(); showStoreModal(); };
+
+  // Edit modal
+  document.getElementById('btnCancelEdit').onclick = closeEditModal;
+  document.getElementById('btnSaveEdit').onclick = saveEdit;
+  document.getElementById('btnDeleteEdit').onclick = deleteItem;
+  document.getElementById('editModal').onclick = e => { if (e.target.id === 'editModal') closeEditModal(); };
+
+  // Store modal
+  document.getElementById('btnSaveStore').onclick = () => {
+    App.settings.storeName = document.getElementById('storeNameInput').value.trim() || CONFIG.STORE_NAME;
+    DB.setSetting('storeName', App.settings.storeName);
+    document.getElementById('storeModal').classList.remove('show');
+    toast('Store name saved', 'success');
+  };
+
+  // Scan result overlay close on bg tap
+  document.getElementById('scanResultOverlay').onclick = e => {
+    if (e.target.id === 'scanResultOverlay') hideScanResult();
+  };
+
+  // Online/offline
+  window.addEventListener('online', () => document.getElementById('offlineTag').classList.remove('show'));
+  window.addEventListener('offline', () => document.getElementById('offlineTag').classList.add('show'));
+}
+
+// ─── INIT ─────────────────────────────────────────────────────
+async function init() {
+  console.log('🚀 GS1 Tracker v' + CONFIG.VERSION);
+  try {
+    await DB.init();
+    App.settings.storeName     = await DB.getSetting('storeName', CONFIG.STORE_NAME);
+    App.settings.hapticEnabled = await DB.getSetting('hapticEnabled', true);
+    App.settings.darkMode      = await DB.getSetting('darkMode', false);
+
+    if (App.settings.darkMode) {
+      document.body.classList.add('dark');
+      document.getElementById('toggleDarkMode').classList.add('on');
+    }
+    if (!App.settings.hapticEnabled) {
+      document.getElementById('toggleHaptic').classList.remove('on');
+    }
+
+    setupEvents();
+    await refreshUI();
+
+    if (!navigator.onLine) document.getElementById('offlineTag').classList.add('show');
+    console.log('✅ Ready — Theme #2C6975');
+  } catch (e) {
+    console.error('Init error:', e);
+    toast('Startup error: ' + e.message, 'error');
+  }
+}
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', init) : init();
