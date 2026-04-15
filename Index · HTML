@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#2C6975">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>GS1 Expiry Tracker</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    /* ─── DESIGN TOKENS ────────────────────────────────── */
+    :root {
+      --P:       #2C6975;   /* primary */
+      --P-dark:  #1E4F5A;
+      --P-mid:   #3D8A99;
+      --P-light: #B8D9DE;
+      --P-pale:  #EEF6F8;
+
+      /* State palette from reference */
+      --S-default: #4EC9C0;
+      --S-hover:   #7DD4C5;
+      --S-press:   #E8C4A0;
+      --S-alert:   #E07A65;
+
+      /* Neutrals */
+      --bg:   #EEF6F8;
+      --surf: #FFFFFF;
+      --bdr:  rgba(44,105,117,0.12);
+      --txt:  #1A3840;
+      --txt2: #4A7A84;
+      --txt3: #8DADB5;
+
+      /* Status */
+      --ok:      #4EC9C0;
+      --warn:    #E8C4A0;
+      --warn-dk: #C9895A;
+      --danger:  #E07A65;
+
+      --shadow-sm: 0 2px 8px rgba(44,105,117,0.10);
+      --shadow-md: 0 6px 24px rgba(44,105,117,0.15);
+      --shadow-lg: 0 16px 48px rgba(44,105,117,0.22);
+
+      --r:   14px;
+      --rl:  22px;
+      --hdr: 56px;
+      --nav: 64px;
+
+      --font: 'Sora', sans-serif;
+      --mono: 'DM Mono', monospace;
+    }
+
+    body.dark {
+      --bg:   #0F2226;
+      --surf: #172E33;
+      --bdr:  rgba(78,201,192,0.12);
+      --txt:  #DFF2F5;
+      --txt2: #7EC8D0;
+      --txt3: #3D6870;
+    }
+
+    /* ─── RESET ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: var(--font); background: var(--bg); color: var(--txt); -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+
+    /* ─── SCROLLBAR ──────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--P-light); border-radius: 2px; }
+
+    /* ─── HEADER ─────────────────────────────────────────── */
+    .hdr {
+      position: sticky; top: 0; z-index: 100;
+      height: var(--hdr);
+      background: var(--P);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px;
+      box-shadow: 0 2px 12px rgba(44,105,117,0.35);
+    }
+    .logo {
+      display: flex; align-items: center; gap: 10px;
+      color: #fff; font-weight: 700; font-size: 1rem; letter-spacing: -0.02em;
+    }
+    .logo-icon {
+      width: 32px; height: 32px; background: rgba(255,255,255,0.2);
+      border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    }
+    .logo-icon svg { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2; }
+    .hdr-btns { display: flex; gap: 8px; }
+    .hdr-btn {
+      width: 36px; height: 36px;
+      background: rgba(255,255,255,0.15);
+      border: none; border-radius: 10px;
+      color: #fff; font-size: 1rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.2s;
+    }
+    .hdr-btn:active { background: rgba(255,255,255,0.3); }
+
+    /* ─── LAYOUT ─────────────────────────────────────────── */
+    .main { padding: 14px 14px calc(var(--nav) + 24px); }
+    .page { display: none; }
+    .page.active { display: block; animation: fadeUp 0.25s ease; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } }
+
+    /* ─── SCAN CARD ──────────────────────────────────────── */
+    .scan-card {
+      background: linear-gradient(145deg, var(--P), var(--P-mid));
+      border-radius: var(--rl);
+      padding: 18px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow-md);
+      position: relative;
+      overflow: hidden;
+    }
+    .scan-card::before {
+      content: '';
+      position: absolute; top: -30px; right: -30px;
+      width: 120px; height: 120px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 50%;
+    }
+    .scan-card::after {
+      content: '';
+      position: absolute; bottom: -40px; right: 40px;
+      width: 80px; height: 80px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 50%;
+    }
+    .scan-title { color: #fff; font-size: 1rem; font-weight: 600; letter-spacing: -0.02em; }
+    .scan-sub { color: rgba(255,255,255,0.65); font-size: 0.7rem; margin-bottom: 14px; }
+    .scan-frame {
+      width: 100%; max-width: 300px; aspect-ratio: 1.6;
+      margin: 0 auto 14px;
+      background: rgba(0,0,0,0.3);
+      border-radius: var(--r);
+      position: relative; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+    #reader { width: 100% !important; height: 100% !important; }
+    #reader video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+    #reader__scan_region, #reader__dashboard_section, #reader img, #reader a { display: none !important; }
+    .scan-ph {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.55); gap: 8px;
+    }
+    .scan-ph svg { width: 40px; height: 40px; }
+    .scan-ph p { font-size: 0.7rem; }
+    .scan-ph.hidden { display: none; }
+    .vf { position: absolute; inset: 14px; display: none; }
+    .vf.active { display: block; }
+    .corner { position: absolute; width: 18px; height: 18px; border: 2.5px solid var(--S-default); }
+    .corner.tl { top:0;left:0;border-right:none;border-bottom:none;border-radius:3px 0 0 0; }
+    .corner.tr { top:0;right:0;border-left:none;border-bottom:none;border-radius:0 3px 0 0; }
+    .corner.bl { bottom:0;left:0;border-right:none;border-top:none;border-radius:0 0 0 3px; }
+    .corner.br { bottom:0;right:0;border-left:none;border-top:none;border-radius:0 0 3px 0; }
+    .scan-line {
+      position: absolute; left: 4%; right: 4%; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--S-default), transparent);
+      box-shadow: 0 0 8px var(--S-default);
+      display: none; animation: sl 2s ease-in-out infinite;
+    }
+    .vf.active .scan-line { display: block; }
+    @keyframes sl { 0%,100%{top:8%} 50%{top:88%} }
+
+    /* ─── SCAN BUTTON ─────────────────────────────────────── */
+    .scan-btn {
+      width: 100%; padding: 13px;
+      background: rgba(255,255,255,0.2);
+      border: 1.5px solid rgba(255,255,255,0.35);
+      border-radius: var(--r); font-weight: 600;
+      color: #fff; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      font-family: var(--font); font-size: 0.9rem;
+      transition: all 0.2s; backdrop-filter: blur(10px);
+    }
+    .scan-btn:active { transform: scale(0.98); }
+    .scan-btn.stop { background: rgba(224,122,101,0.35); border-color: var(--danger); }
+
+    /* ─── INPUT CARD ─────────────────────────────────────── */
+    .input-card {
+      background: var(--surf); border-radius: var(--r);
+      padding: 14px; margin-bottom: 14px;
+      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--bdr);
+    }
+    .input-label { font-size: 0.6rem; font-weight: 600; color: var(--txt3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+    .input-row { display: flex; gap: 8px; }
+    .text-input {
+      flex: 1; padding: 11px 12px;
+      background: var(--bg); border: 1.5px solid var(--bdr);
+      border-radius: 10px; font-family: var(--mono); font-size: 0.85rem;
+      color: var(--txt); outline: none; transition: border-color 0.2s;
+    }
+    .text-input:focus { border-color: var(--P-mid); }
+    .add-btn {
+      padding: 11px 16px; background: var(--S-default);
+      border: none; border-radius: 10px; font-weight: 600;
+      color: #fff; cursor: pointer; font-family: var(--font);
+      transition: all 0.2s;
+    }
+    .add-btn:active { transform: scale(0.97); background: var(--P-mid); }
+
+    /* ─── SECTION ─────────────────────────────────────────── */
+    .sec-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .sec-title { font-size: 0.95rem; font-weight: 700; letter-spacing: -0.02em; color: var(--txt); }
+    .sec-link { font-size: 0.72rem; font-weight: 600; color: var(--P-mid); cursor: pointer; }
+
+    /* ─── HISTORY ITEMS ──────────────────────────────────── */
+    .history-list { display: flex; flex-direction: column; gap: 8px; }
+    .history-item {
+      background: var(--surf); border-radius: var(--r);
+      padding: 11px 12px; display: flex; align-items: center; gap: 11px;
+      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--bdr);
+      border-left: 4px solid var(--ok);
+      cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .history-item:active { transform: scale(0.99); }
+    .history-item.expired { border-left-color: var(--danger); }
+    .history-item.expiring { border-left-color: var(--warn-dk); }
+    .history-item.unknown { border-left-color: var(--txt3); }
+
+    /* Product icon */
+    .item-icon {
+      width: 40px; height: 40px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 0; /* hide text fallback */
+    }
+    .item-icon svg { width: 22px; height: 22px; }
+
+    .item-info { flex: 1; min-width: 0; }
+    .item-name { font-size: 0.8rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--txt); }
+    .item-meta { font-size: 0.62rem; color: var(--txt2); margin-top: 2px; }
+
+    .badge {
+      padding: 3px 8px; border-radius: 20px;
+      font-size: 0.55rem; font-weight: 700;
+      white-space: nowrap; flex-shrink: 0; letter-spacing: 0.03em;
+    }
+    .badge-ok { background: rgba(78,201,192,0.15); color: #2A9D8F; }
+    .badge-expiring { background: rgba(232,196,160,0.4); color: var(--warn-dk); }
+    .badge-expired { background: rgba(224,122,101,0.15); color: var(--danger); }
+    .badge-unknown { background: rgba(141,173,181,0.2); color: var(--txt3); }
+
+    .qty-controls { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .qty-btn {
+      width: 26px; height: 26px; border: 1.5px solid var(--bdr);
+      border-radius: 8px; background: var(--bg); color: var(--P);
+      font-weight: 700; cursor: pointer; font-size: 1rem; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .qty-btn:active { background: var(--P-light); }
+    .qty-value { min-width: 20px; text-align: center; font-weight: 700; font-size: 0.8rem; font-family: var(--mono); }
+
+    .empty-state { text-align: center; padding: 30px 20px; color: var(--txt3); }
+    .empty-state svg { width: 48px; height: 48px; margin-bottom: 10px; opacity: 0.4; }
+    .empty-state p { font-size: 0.8rem; }
+
+    /* ─── SEARCH BAR ─────────────────────────────────────── */
+    .search-bar { position: relative; margin-bottom: 10px; }
+    .search-bar input {
+      width: 100%; padding: 11px 14px 11px 38px;
+      background: var(--surf); border: 1.5px solid var(--bdr);
+      border-radius: var(--r); font-size: 0.85rem; font-family: var(--font);
+      color: var(--txt); outline: none; box-shadow: var(--shadow-sm);
+      transition: border-color 0.2s;
+    }
+    .search-bar input:focus { border-color: var(--P-mid); }
+    .search-icon {
+      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+      width: 16px; height: 16px; color: var(--txt3); pointer-events: none;
+    }
+    .chips { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 12px; padding-bottom: 2px; scrollbar-width: none; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip {
+      padding: 6px 12px; background: var(--surf);
+      border: 1.5px solid var(--bdr); border-radius: 20px;
+      font-size: 0.7rem; font-weight: 500; color: var(--txt2);
+      cursor: pointer; white-space: nowrap; font-family: var(--font);
+      transition: all 0.2s;
+    }
+    .chip.active { background: var(--P); color: #fff; border-color: var(--P); }
+
+    /* ─── BULK ───────────────────────────────────────────── */
+    .bulk-card {
+      background: var(--surf); border-radius: var(--rl);
+      padding: 16px; box-shadow: var(--shadow-sm);
+      border: 1px solid var(--bdr);
+    }
+    .bulk-ta {
+      width: 100%; min-height: 110px; padding: 12px;
+      background: var(--bg); border: 1.5px solid var(--bdr);
+      border-radius: var(--r); font-family: var(--mono); font-size: 0.8rem;
+      color: var(--txt); resize: vertical; margin-bottom: 10px;
+      outline: none; transition: border-color 0.2s;
+    }
+    .bulk-ta:focus { border-color: var(--P-mid); }
+    .btn-row { display: flex; gap: 8px; margin-bottom: 14px; }
+    .btn {
+      flex: 1; padding: 11px; border: none; border-radius: var(--r);
+      font-weight: 600; cursor: pointer; font-family: var(--font);
+      font-size: 0.85rem; transition: all 0.2s;
+    }
+    .btn-primary { background: var(--P); color: #fff; }
+    .btn-primary:active { background: var(--P-dark); transform: scale(0.98); }
+    .btn-ghost { background: var(--bg); color: var(--txt2); border: 1.5px solid var(--bdr); }
+    .btn-outline { background: transparent; border: 2px solid var(--P); color: var(--P); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .stat {
+      background: var(--bg); border-radius: var(--r);
+      padding: 14px 8px; text-align: center;
+      border: 1px solid var(--bdr);
+    }
+    .stat-num { font-size: 1.3rem; font-weight: 700; color: var(--P); font-family: var(--mono); }
+    .stat-label { font-size: 0.55rem; color: var(--txt3); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+
+    /* ─── SETTINGS ───────────────────────────────────────── */
+    .settings-sec {
+      background: var(--surf); border-radius: var(--r);
+      margin-bottom: 12px; overflow: hidden;
+      box-shadow: var(--shadow-sm); border: 1px solid var(--bdr);
+    }
+    .settings-hdr {
+      padding: 12px 16px; background: var(--P);
+      color: #fff; font-weight: 600; font-size: 0.85rem;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .settings-body { padding: 14px 16px; }
+    .upload-area {
+      padding: 22px 16px; border: 2px dashed var(--P-light);
+      border-radius: var(--r); text-align: center; cursor: pointer;
+      background: var(--P-pale); transition: all 0.2s;
+    }
+    .upload-area:hover { border-color: var(--P-mid); background: rgba(44,105,117,0.07); }
+    .upload-icon { font-size: 1.8rem; display: block; margin-bottom: 6px; }
+    .upload-area p { font-size: 0.78rem; color: var(--txt2); }
+    .upload-area small { font-size: 0.65rem; color: var(--txt3); }
+
+    /* Sample download button */
+    .sample-download {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px; background: rgba(78,201,192,0.1);
+      border: 1.5px solid var(--S-default); border-radius: 10px;
+      color: var(--P); font-size: 0.78rem; font-weight: 600;
+      cursor: pointer; margin-top: 10px; font-family: var(--font);
+      transition: all 0.2s; width: 100%;
+    }
+    .sample-download:hover { background: rgba(78,201,192,0.18); }
+    .sample-download svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+    .toggle-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 11px 0; border-bottom: 1px solid var(--bg);
+    }
+    .toggle-item:last-child { border: none; }
+    .toggle-item label { font-size: 0.85rem; display: flex; align-items: center; gap: 8px; }
+    .toggle {
+      width: 44px; height: 24px; background: var(--txt3);
+      border-radius: 12px; position: relative; cursor: pointer;
+      transition: background 0.25s;
+    }
+    .toggle::after {
+      content: ''; position: absolute;
+      width: 18px; height: 18px; background: #fff;
+      border-radius: 50%; top: 3px; left: 3px;
+      transition: left 0.25s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .toggle.on { background: var(--P); }
+    .toggle.on::after { left: 23px; }
+
+    .export-btn {
+      width: 100%; padding: 13px; border: none; border-radius: var(--r);
+      font-weight: 600; color: #fff; cursor: pointer; margin-top: 8px;
+      font-family: var(--font); font-size: 0.85rem; display: flex;
+      align-items: center; justify-content: center; gap: 8px;
+      transition: all 0.2s;
+    }
+    .export-btn.teal { background: var(--S-default); }
+    .export-btn.teal:active { background: #3AB5AC; }
+    .export-btn.blue { background: var(--P); }
+    .export-btn.blue:active { background: var(--P-dark); }
+    .export-btn.red { background: var(--danger); }
+    .export-btn.red:active { background: #C5604D; }
+
+    /* ─── NAVIGATION ─────────────────────────────────────── */
+    .nav {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      height: var(--nav); background: var(--surf);
+      border-top: 1px solid var(--bdr);
+      display: flex; z-index: 100;
+      box-shadow: 0 -4px 20px rgba(44,105,117,0.1);
+    }
+    .nav-btn {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 3px;
+      background: none; border: none; color: var(--txt3);
+      cursor: pointer; transition: color 0.2s; position: relative;
+    }
+    .nav-btn.active { color: var(--P); }
+    .nav-btn.active::before {
+      content: ''; position: absolute; top: 0; left: 25%; right: 25%;
+      height: 3px; background: var(--P); border-radius: 0 0 3px 3px;
+    }
+    .nav-btn svg { width: 22px; height: 22px; }
+    .nav-btn span { font-size: 0.55rem; font-weight: 600; letter-spacing: 0.04em; }
+
+    /* ─── MODALS ─────────────────────────────────────────── */
+    .modal-bg {
+      position: fixed; inset: 0; background: rgba(14,36,40,0.6);
+      display: none; align-items: center; justify-content: center;
+      z-index: 200; padding: 16px; backdrop-filter: blur(4px);
+    }
+    .modal-bg.show { display: flex; }
+    .modal {
+      background: var(--surf); border-radius: var(--rl);
+      width: 100%; max-width: 360px; max-height: 88vh;
+      overflow-y: auto; animation: slideUp 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      border: 1px solid var(--bdr);
+    }
+    @keyframes slideUp { from { opacity:0; transform: translateY(20px) scale(0.97); } }
+    .modal-head {
+      padding: 16px; background: var(--P);
+      color: #fff; font-weight: 700; text-align: center;
+      font-size: 0.95rem; letter-spacing: -0.01em;
+    }
+    .modal-body { padding: 16px; }
+    .form-group { margin-bottom: 11px; }
+    .form-label {
+      display: block; font-size: 0.6rem; font-weight: 600;
+      color: var(--txt2); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 5px;
+    }
+    .form-control {
+      width: 100%; padding: 10px 12px;
+      background: var(--bg); border: 1.5px solid var(--bdr);
+      border-radius: 10px; font-size: 0.85rem; color: var(--txt);
+      font-family: var(--font); outline: none; transition: border-color 0.2s;
+    }
+    .form-control:focus { border-color: var(--P-mid); }
+    .form-control.mono { font-family: var(--mono); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+
+    /* ─── SIDE MENU ──────────────────────────────────────── */
+    .side-bg { position: fixed; inset: 0; background: rgba(14,36,40,0.5); z-index: 150; display: none; backdrop-filter: blur(3px); }
+    .side-bg.show { display: block; }
+    .side-menu {
+      position: fixed; top: 0; right: -260px; width: 260px; height: 100%;
+      background: var(--surf); z-index: 151; transition: right 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      padding: 20px 16px; border-left: 1px solid var(--bdr);
+      box-shadow: -8px 0 32px rgba(44,105,117,0.2);
+    }
+    .side-menu.show { right: 0; }
+    .side-menu-title { font-size: 0.7rem; font-weight: 700; color: var(--txt3); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 16px; margin-top: 8px; }
+    .side-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 10px; border-radius: var(--r); cursor: pointer;
+      color: var(--txt2); font-size: 0.85rem; font-weight: 500;
+      transition: all 0.2s; margin-bottom: 2px;
+    }
+    .side-item:hover { color: var(--P); background: var(--P-pale); }
+    .side-item-icon { width: 32px; height: 32px; background: var(--bg); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+
+    /* ─── TOAST ──────────────────────────────────────────── */
+    .toast-wrap { position: fixed; top: calc(var(--hdr) + 10px); left: 12px; right: 12px; z-index: 300; display: flex; flex-direction: column; gap: 6px; }
+    .toast {
+      background: var(--surf); border-radius: 12px;
+      padding: 10px 14px; box-shadow: var(--shadow-md);
+      display: flex; align-items: center; gap: 10px;
+      animation: toastIn 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      transition: opacity 0.3s; border: 1px solid var(--bdr);
+    }
+    @keyframes toastIn { from { opacity:0; transform: translateY(-12px) scale(0.95); } }
+    .toast-icon {
+      width: 26px; height: 26px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 0.8rem; font-weight: 700; flex-shrink: 0;
+    }
+    .toast.success .toast-icon { background: var(--S-default); }
+    .toast.error .toast-icon { background: var(--danger); }
+    .toast.warning .toast-icon { background: var(--warn-dk); }
+    .toast.info .toast-icon { background: var(--P); }
+    .toast span { font-size: 0.8rem; font-weight: 500; }
+
+    /* ─── SCAN RESULT WIDGET ─────────────────────────────── */
+    .scan-result-overlay {
+      position: fixed; inset: 0;
+      background: rgba(14,36,40,0.65);
+      display: none; align-items: flex-end; justify-content: center;
+      z-index: 250; backdrop-filter: blur(6px);
+    }
+    .scan-result-overlay.show { display: flex; }
+
+    .srw {
+      background: var(--surf);
+      border-radius: 28px 28px 0 0;
+      width: 100%; max-width: 480px;
+      max-height: 85vh; overflow-y: auto;
+      animation: srwUp 0.35s cubic-bezier(0.34,1.56,0.64,1);
+      border-top: 1px solid var(--bdr);
+    }
+    @keyframes srwUp { from { transform: translateY(100%); opacity: 0.5; } }
+
+    /* Drag handle */
+    .srw-handle { display: flex; justify-content: center; padding: 12px 0 0; }
+    .srw-handle-bar { width: 40px; height: 4px; background: var(--bdr); border-radius: 2px; }
+
+    /* Status banner — clay button style */
+    .srw-banner {
+      margin: 12px 16px;
+      padding: 14px 16px;
+      border-radius: 20px;
+      display: flex; align-items: center; gap: 12px;
+      position: relative; overflow: hidden;
+    }
+    .srw-banner.found {
+      background: var(--S-default);
+      box-shadow: 0 6px 20px rgba(78,201,192,0.4), inset 0 1px 0 rgba(255,255,255,0.3);
+    }
+    .srw-banner.notfound {
+      background: var(--S-press);
+      box-shadow: 0 6px 20px rgba(232,196,160,0.4), inset 0 1px 0 rgba(255,255,255,0.3);
+    }
+    .srw-banner.expired-banner {
+      background: var(--S-alert);
+      box-shadow: 0 6px 20px rgba(224,122,101,0.4), inset 0 1px 0 rgba(255,255,255,0.3);
+    }
+    .srw-banner-icon {
+      width: 44px; height: 44px; border-radius: 14px;
+      background: rgba(255,255,255,0.25);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .srw-banner-icon svg { width: 24px; height: 24px; }
+    .srw-banner-text { flex: 1; }
+    .srw-banner-title { font-size: 0.9rem; font-weight: 700; color: #fff; letter-spacing: -0.01em; }
+    .srw-banner-sub { font-size: 0.7rem; color: rgba(255,255,255,0.8); margin-top: 1px; }
+    .srw-close-btn {
+      width: 32px; height: 32px; border-radius: 10px;
+      background: rgba(255,255,255,0.25); border: none;
+      color: #fff; font-size: 1rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Product name */
+    .srw-product {
+      padding: 4px 16px 12px;
+      font-size: 1.05rem; font-weight: 700; letter-spacing: -0.02em; color: var(--txt);
+      line-height: 1.3;
+    }
+
+    /* Info grid */
+    .srw-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px; padding: 0 16px; margin-bottom: 12px;
+    }
+    .srw-cell {
+      background: var(--bg); border-radius: 14px;
+      padding: 10px 12px; border: 1px solid var(--bdr);
+    }
+    .srw-cell-label {
+      font-size: 0.52rem; font-weight: 700; color: var(--txt3);
+      text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px;
+    }
+    .srw-cell-value {
+      font-size: 0.82rem; font-weight: 600; color: var(--txt);
+      font-family: var(--mono); word-break: break-all;
+    }
+    .srw-cell-value.ok { color: var(--ok); }
+    .srw-cell-value.expiring { color: var(--warn-dk); }
+    .srw-cell-value.expired { color: var(--danger); }
+    .srw-cell-value.text { font-family: var(--font); }
+
+    /* Status pill inside cell */
+    .srw-status-pill {
+      display: inline-block; padding: 3px 10px;
+      border-radius: 20px; font-size: 0.62rem; font-weight: 700;
+      margin-top: 4px;
+    }
+    .pill-ok { background: rgba(78,201,192,0.15); color: #2A9D8F; }
+    .pill-expiring { background: rgba(232,196,160,0.4); color: var(--warn-dk); }
+    .pill-expired { background: rgba(224,122,101,0.15); color: var(--danger); }
+
+    /* Manual entry section */
+    .srw-manual {
+      margin: 0 16px 12px;
+      padding: 12px; background: rgba(232,196,160,0.12);
+      border-radius: 14px; border: 1.5px dashed var(--warn-dk);
+    }
+    .srw-manual-title {
+      font-size: 0.62rem; font-weight: 700; color: var(--warn-dk);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;
+    }
+    .srw-row { display: flex; gap: 8px; }
+    .srw-input {
+      flex: 1; padding: 9px 10px;
+      background: var(--surf); border: 1.5px solid var(--bdr);
+      border-radius: 10px; font-size: 0.82rem; font-family: var(--mono);
+      color: var(--txt); outline: none;
+      transition: border-color 0.2s;
+    }
+    .srw-input:focus { border-color: var(--P-mid); }
+
+    /* Qty row */
+    .srw-qty {
+      display: flex; align-items: center; justify-content: center;
+      gap: 14px; padding: 0 16px 12px;
+    }
+    .srw-qty-label { font-size: 0.7rem; font-weight: 600; color: var(--txt2); }
+    .qty-input {
+      width: 60px; padding: 8px; text-align: center;
+      border: 2px solid var(--P-light); border-radius: 12px;
+      font-size: 1rem; font-weight: 700; font-family: var(--mono);
+      background: var(--bg); color: var(--txt); outline: none;
+    }
+
+    /* Actions */
+    .srw-actions {
+      display: flex; gap: 8px;
+      padding: 4px 16px 20px;
+    }
+    .srw-actions .btn { padding: 13px; font-size: 0.85rem; }
+
+    /* ─── MISC ──────────────────────────────────────────── */
+    .hidden { display: none !important; }
+    .offline-tag {
+      position: fixed; top: calc(var(--hdr) + 6px); left: 50%;
+      transform: translateX(-50%); padding: 4px 12px;
+      background: var(--warn-dk); border-radius: 20px;
+      font-size: 0.65rem; font-weight: 700; color: #fff;
+      display: none; z-index: 150; box-shadow: var(--shadow-sm);
+    }
+    .offline-tag.show { display: block; }
+    .file-input { position: absolute; opacity: 0; pointer-events: none; }
+
+    /* Version tag */
+    .version-tag {
+      display: flex; align-items: center; justify-content: center;
+      gap: 6px; padding: 10px; color: var(--txt3); font-size: 0.65rem;
+    }
+    .version-badge {
+      background: var(--P-pale); padding: 2px 8px; border-radius: 20px;
+      color: var(--P); font-weight: 600; font-family: var(--mono);
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- HEADER -->
+  <header class="hdr">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="4" height="18" rx="1"/><rect x="9" y="7" width="2" height="14" rx="1"/><rect x="13" y="3" width="3" height="18" rx="1"/><rect x="18" y="6" width="2" height="15" rx="1"/></svg>
+      </div>
+      GS1 Tracker
+    </div>
+    <div class="hdr-btns">
+      <button class="hdr-btn" id="btnMenu" title="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="offline-tag" id="offlineTag">● Offline</div>
+  <div class="toast-wrap" id="toastWrap"></div>
+
+  <main class="main">
+
+    <!-- ══ HOME ══════════════════════════════════════════ -->
+    <div class="page active" id="page-home">
+
+      <div class="scan-card">
+        <div class="scan-title">Scan Barcode</div>
+        <div class="scan-sub">GS1-128 · DataMatrix · EAN-13 · UPC</div>
+        <div class="scan-frame" id="scannerFrame">
+          <div id="reader"></div>
+          <div class="scan-ph" id="scannerPlaceholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 7V5a2 2 0 00-2-2h-2M1 17v2a2 2 0 002 2h2M23 17v2a2 2 0 01-2 2h-2M1 7V5a2 2 0 012-2h2"/><rect x="7" y="7" width="3" height="10" rx="1"/><rect x="11" y="7" width="1" height="10" rx="0.5"/><rect x="13" y="7" width="2" height="10" rx="0.5"/><rect x="16" y="7" width="1" height="10" rx="0.5"/></svg>
+            <p>Tap to scan</p>
+          </div>
+          <div class="vf" id="viewfinder">
+            <div class="corner tl"></div><div class="corner tr"></div>
+            <div class="corner bl"></div><div class="corner br"></div>
+            <div class="scan-line"></div>
+          </div>
+        </div>
+        <button class="scan-btn" id="btnScanner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><circle cx="12" cy="12" r="4"/><path d="M20.7 7.3A9 9 0 1 0 7.3 20.7"/></svg>
+          <span id="btnScannerText">Start Scanner</span>
+        </button>
+      </div>
+
+      <div class="input-card">
+        <div class="input-label">Manual / Barcode Entry</div>
+        <div class="input-row">
+          <input type="text" class="text-input" id="manualInput" placeholder="Scan or type barcode…" autocomplete="off">
+          <button class="add-btn" id="btnManualAdd">Add</button>
+        </div>
+      </div>
+
+      <section>
+        <div class="sec-head">
+          <h3 class="sec-title">Recent Scans</h3>
+          <span class="sec-link" id="viewAllHistory">View All →</span>
+        </div>
+        <div class="history-list" id="recentScans">
+          <div class="empty-state" id="emptyRecent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/><path d="M16 3H8a1 1 0 00-1 1v3h10V4a1 1 0 00-1-1z"/></svg>
+            <p>No scans yet</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ══ HISTORY ════════════════════════════════════════ -->
+    <div class="page" id="page-history">
+      <div class="search-bar">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search by name, RMS, batch…">
+      </div>
+      <div class="chips">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="expired">⛔ Expired</button>
+        <button class="chip" data-filter="expiring">⚠️ Expiring</button>
+        <button class="chip" data-filter="ok">✅ OK</button>
+      </div>
+      <div class="history-list" id="historyList">
+        <div class="empty-state" id="emptyHistory">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>
+          <p>No items found</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ BULK ═══════════════════════════════════════════ -->
+    <div class="page" id="page-manual">
+      <div class="sec-title" style="margin-bottom: 12px;">Bulk Entry</div>
+      <div class="bulk-card">
+        <div class="input-label" style="margin-bottom:8px;">One barcode per line</div>
+        <textarea class="bulk-ta" id="bulkInput" placeholder="010000012345678917250631&#10;010000098765432117251231&#10;..."></textarea>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btnProcessBulk">⚡ Process</button>
+          <button class="btn btn-ghost" id="btnClearBulk">Clear</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="stat-num" id="statTotal">0</div><div class="stat-label">Total</div></div>
+          <div class="stat"><div class="stat-num" id="statValid">0</div><div class="stat-label">Valid GS1</div></div>
+          <div class="stat"><div class="stat-num" id="statMatched">0</div><div class="stat-label">Matched</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SETTINGS ═══════════════════════════════════════ -->
+    <div class="page" id="page-settings">
+      <div class="sec-title" style="margin-bottom: 14px;">Settings</div>
+
+      <div class="settings-sec">
+        <div class="settings-hdr">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Master Product Data
+        </div>
+        <div class="settings-body">
+          <div class="upload-area" id="uploadArea">
+            <input type="file" class="file-input" id="masterFileInput" accept=".csv,.tsv,.txt">
+            <span class="upload-icon">📤</span>
+            <p>Tap to upload CSV / TSV</p>
+            <small>Columns: barcode, name, rms, alshayaCode, brand, supplier…</small>
+          </div>
+          <button class="sample-download" id="btnSampleDownload">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download Sample Master File (CSV)
+          </button>
+          <div class="stats" style="margin-top: 12px;">
+            <div class="stat"><div class="stat-num" id="masterCount">0</div><div class="stat-label">Products</div></div>
+            <div class="stat"><div class="stat-num" id="historyCount">0</div><div class="stat-label">Scans</div></div>
+            <div class="stat"><div class="stat-num" id="lastUpdated">—</div><div class="stat-label">Updated</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-sec">
+        <div class="settings-hdr">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg>
+          Preferences
+        </div>
+        <div class="settings-body">
+          <div class="toggle-item">
+            <label>🌙 Dark Mode</label>
+            <div class="toggle" id="toggleDarkMode"></div>
+          </div>
+          <div class="toggle-item">
+            <label>📳 Haptic Feedback</label>
+            <div class="toggle on" id="toggleHaptic"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-sec">
+        <div class="settings-hdr">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export Data
+        </div>
+        <div class="settings-body">
+          <button class="export-btn teal" id="btnExportCSV">📊 Export Full CSV</button>
+          <button class="export-btn blue" id="btnExportTSV">📑 Export TSV (Excel)</button>
+          <button class="export-btn red" id="btnClearAll">🗑 Clear All Scans</button>
+        </div>
+      </div>
+
+      <div class="version-tag">
+        GS1 Expiry Tracker <span class="version-badge">v10.0.0</span>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="nav">
+    <button class="nav-btn active" data-page="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn" data-page="history">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="13" y2="13"/></svg>
+      <span>History</span>
+    </button>
+    <button class="nav-btn" data-page="manual">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      <span>Bulk</span>
+    </button>
+    <button class="nav-btn" data-page="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
+
+  <!-- SIDE MENU -->
+  <div class="side-bg" id="sideMenuBg"></div>
+  <div class="side-menu" id="sideMenu">
+    <div class="side-menu-title">Quick Actions</div>
+    <div class="side-item" id="menuStore"><span class="side-item-icon">🏪</span> Store Name</div>
+    <div class="side-item" id="menuExport"><span class="side-item-icon">📊</span> Export CSV</div>
+    <div class="side-item" id="menuClear"><span class="side-item-icon">🗑</span> Clear History</div>
+    <div class="side-item" id="menuAbout"><span class="side-item-icon">ℹ️</span> About</div>
+  </div>
+
+  <!-- SCAN RESULT WIDGET -->
+  <div class="scan-result-overlay" id="scanResultOverlay">
+    <div class="srw" id="scanResultWidget">
+      <div class="srw-handle"><div class="srw-handle-bar"></div></div>
+      <!-- dynamically populated -->
+    </div>
+  </div>
+
+  <!-- EDIT MODAL -->
+  <div class="modal-bg" id="editModal">
+    <div class="modal">
+      <div class="modal-head">✏️ Edit Item</div>
+      <div class="modal-body">
+        <div class="form-group"><label class="form-label">Product Name</label><input type="text" class="form-control" id="editName"></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">RMS Code</label><input type="text" class="form-control mono" id="editRms"></div>
+          <div class="form-group"><label class="form-label">Alshaya Code</label><input type="text" class="form-control mono" id="editAlshaya"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Brand</label><input type="text" class="form-control" id="editBrand"></div>
+          <div class="form-group"><label class="form-label">Quantity</label><input type="number" class="form-control" id="editQty" min="1"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Expiry Date</label><input type="date" class="form-control" id="editExpiry"></div>
+          <div class="form-group"><label class="form-label">Batch No.</label><input type="text" class="form-control mono" id="editBatch"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select class="form-control" id="editCategory">
+            <option value="medicine">💊 Medicine / Capsule</option>
+            <option value="syrup">🧪 Syrup / Liquid</option>
+            <option value="injection">💉 Injection / Vial</option>
+            <option value="tablet">⬜ Tablet / Caplet</option>
+            <option value="cream">🧴 Cream / Gel / Ointment</option>
+            <option value="spray">🌬 Spray / Inhaler</option>
+            <option value="vitamins">🫙 Vitamins / Supplements</option>
+            <option value="baby">👶 Baby / Infant</option>
+            <option value="cosmetics">✨ Cosmetics</option>
+            <option value="other">📦 Other</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Remarks</label><textarea class="form-control" id="editRemarks" rows="2"></textarea></div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="btnCancelEdit">Cancel</button>
+          <button class="btn btn-ghost" id="btnDeleteEdit" style="color: var(--danger);">Delete</button>
+          <button class="btn btn-primary" id="btnSaveEdit">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STORE MODAL -->
+  <div class="modal-bg" id="storeModal">
+    <div class="modal">
+      <div class="modal-head">🏪 Store Name</div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Store Name (appears in exports)</label>
+          <input type="text" class="form-control" id="storeNameInput" placeholder="OASIS PHARMACY">
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" onclick="document.getElementById('storeModal').classList.remove('show')">Cancel</button>
+          <button class="btn btn-primary" id="btnSaveStore">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- .app -->
+
+<script src="master-data.js" onerror="console.log('No master-data.js')"></script>
+<script src="app.js"></script>
+</body>
+</html>
